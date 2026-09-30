@@ -1,6 +1,7 @@
+#!/usr/bin/env python
+ 
 # Test file for the chat application
 
-#!/usr/bin/env python3
 import sys
 import uuid
 from dotenv import load_dotenv
