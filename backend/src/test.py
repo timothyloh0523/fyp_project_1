@@ -15,34 +15,56 @@ def main():
     session_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": session_id}}
 
-    print("=== LearnLoop Interactive CLI ===")
-    print(f"Session Thread ID: {session_id}\n")
+    print("=== LearnLoop CLI Session ===")
+    print(f"Session Thread ID: {session_id}")
+    print("Commands:")
+    print("  <your question>     : Ask a new question (default behavior, ignores active probing check)")
+    print("  /a <your answer>    : Answer the active probing question")
+    print("  /exit OR /quit           : Terminate session\n")
 
     while True:
         try:
             user_input = input("You: ").strip()
             if not user_input:
                 continue
-            if user_input.lower() in ["exit", "quit"]:
+            if user_input.lower() in ["/exit", "/quit"]:
                 print("Ending session. Goodbye!")
                 break
+
+            # Get current graph state to check if we are currently awaiting evaluation
+            current_state = app_graph.get_state(config)
+            is_awaiting_eval = current_state.values.get("awaiting_eval", False) if current_state.values else False
+
+            # Case 1: User explicitly wants to answer the probing question using /a
+            if user_input.startswith("/a"):
+                clean_answer = user_input[2:].strip()
+                if not clean_answer:
+                    print("[System]: Please provide your answer after /a (e.g. /a eigenvector)")
+                    continue
+                
+                if not is_awaiting_eval:
+                    print("[System]: There is currently no active probing question to answer. Treating as a new question...\n")
+                    user_input = clean_answer
+                else:
+                    user_input = clean_answer
+
+            # Case 2: Default behavior - user typed a prompt without /a
+            else:
+                # If a probing question was active, explicitly clear awaiting_eval state to ask a new question
+                if is_awaiting_eval:
+                    app_graph.update_state(config, {"awaiting_eval": False})
 
             inputs = {"messages": [HumanMessage(content=user_input)]}
             result = app_graph.invoke(inputs, config=config)
             
             latest_message = result["messages"][-1]
-            print(f"\nTutor: {latest_message.content}\n")
-
-            # Check if state is waiting for follow-up progress answer
+            
+            # Print execution mode feedback
             if result.get("awaiting_eval"):
-                print("--- [PROGRESS CHECK ACTIVE] ---")
-                answer_input = input("Your Answer (Short phrase/word): ").strip()
-                
-                eval_inputs = {"messages": [HumanMessage(content=answer_input)]}
-                eval_result = app_graph.invoke(eval_inputs, config=config)
-                
-                eval_message = eval_result["messages"][-1]
-                print(f"\n[Evaluation Node]:\n{eval_message.content}\n")
+                print(f"\n[Tutor Response + Probing Question]:\n{latest_message.content}\n")
+                print("--> (Side Panel: Probing question active. Type '/a <answer>' to answer it, or just type your next question to ignore it.)\n")
+            else:
+                print(f"\n[Evaluation Response]:\n{latest_message.content}\n")
 
         except (KeyboardInterrupt, EOFError):
             print("\nSession interrupted. Goodbye!")
