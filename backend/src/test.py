@@ -18,7 +18,7 @@ def main():
     print("=== LearnLoop CLI Session ===")
     print(f"Session Thread ID: {session_id}")
     print("Commands:")
-    print("  <your question>     : Ask a new question (default behavior, ignores active probing check)")
+    print("  <your question>     : Ask a new question (default behaviour, ignores active probing check)")
     print("  /a <your answer>    : Answer the active probing question")
     print("  /exit OR /quit           : Terminate session\n")
 
@@ -48,7 +48,7 @@ def main():
                 else:
                     user_input = clean_answer
 
-            # Case 2: Default behavior - user typed a prompt without /a
+            # Case 2: Default behaviour - user typed a prompt without /a
             else:
                 # If a probing question was active, explicitly clear awaiting_eval state to ask a new question
                 if is_awaiting_eval:
@@ -56,6 +56,21 @@ def main():
 
             inputs = {"messages": [HumanMessage(content=user_input)]}
             result = app_graph.invoke(inputs, config=config)
+
+            # Update user_stats if evaluation just completed
+
+            if not result.get("awaiting_eval") and "user_stats" in result:
+                board = result["user_stats"]
+                score = result.get("score", 0)
+                print(f"\n[Evaluation Response]:\n{latest_message.content}\n")
+                print("--------------------------------------------------")
+                print(f"   USER STATISTICS (Current Run):")
+                print(f"   • Result         : {'Correct (1/1)' if score == 1 else 'Incorrect (0/1)'}")
+                print(f"   • Total Attempts : {board['total_attempts']}")
+                print(f"   • Total Score    : {board['total_score']} / {board['total_attempts']}")
+                print(f"   • Current Streak : {board['curr_streak']} ")
+                print(f"   • Best Streak    : {board['best_streak']} ")
+                print("--------------------------------------------------\n")
             
             latest_message = result["messages"][-1]
             

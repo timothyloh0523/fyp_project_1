@@ -6,20 +6,15 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, SystemMessage
 
+import re
+
 from coinflip import flip_coin
 from prompts import answer_with_follow_up_prompt, base_prompt, evaluation_prompt
+from state import AgentState, UserStats
 
 load_dotenv()
 
 TOPIC = "Linear Algebra"
-
-class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    # Flag to indicate if the system is awaiting a follow-up answer from the user
-    # If true, expect next user input to be answer to probing question
-    awaiting_eval: bool
-    coin_result: Optional[str]
-    score: Optional[int]
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
@@ -40,12 +35,21 @@ def tutor_node(state: AgentState) -> dict:
     system_prompt = SystemMessage(content=system_content)
     full_messages = [system_prompt] + list(state["messages"])
     response = llm.invoke(full_messages)
+
+    # Get user_stats, initialise if not present
+    current_board = state.get("user_stats") or {
+        "curr_streak": 0,
+        "best_streak": 0,
+        "total_score": 0,
+        "total_attempts": 0,
+    }
     
     return {
         "messages": [response],
         "awaiting_eval": awaiting_eval,
         # "coin_result": coin_result # Toggle to this line if using randomisation mode
-        "coin_result": "tails"
+        "coin_result": "tails",
+        "user_stats": current_board
     }
 
 def evaluate_node(state: AgentState) -> dict:
@@ -53,10 +57,42 @@ def evaluate_node(state: AgentState) -> dict:
     full_messages = [system_prompt] + list(state["messages"])
     response = llm.invoke(full_messages)
     
-    # Reset evaluation flag after processing
+    # Parse binary score (0 or 1) from response (e.g., "Score: 1" or "Score: 1/1")
+    score_match = re.search(r"Score:\s*([01])(?:/1)?", response.content, re.IGNORECASE)
+    score = int(score_match.group(1)) if score_match else 0  # Fallback to 0 if unparsed
+
+    # Retrieve current user_stats metrics
+    board = state.get("user_stats") or {
+        "curr_streak": 0,
+        "best_streak": 0,
+        "total_score": 0,
+        "total_attempts": 0,
+    }
+
+    # Update attempt & total score
+    total_attempts = board["total_attempts"] + 1
+    total_score = board["total_score"] + score
+
+    # Binary logic: Score 1 increments streak, Score 0 resets streak
+    if score == 1:
+        curr_streak = board["curr_streak"] + 1
+        best_streak = max(board["best_streak"], curr_streak)
+    else:
+        curr_streak = 0  # Score 0 resets streak
+        best_streak = board["best_streak"]
+
+    updated_board: user_stats = {
+        "curr_streak": curr_streak,
+        "best_streak": best_streak,
+        "total_score": total_score,
+        "total_attempts": total_attempts,
+    }
+
     return {
         "messages": [response],
-        "awaiting_eval": False
+        "awaiting_eval": False,
+        "score": score,
+        "user_stats": updated_board,
     }
 
 def route_tutor(state: AgentState) -> str:
