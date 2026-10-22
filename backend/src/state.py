@@ -3,8 +3,10 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 class OptionItem(TypedDict):
-    option: str      # e.g., "a", "b", "c", "d" or option text
+    label: str        # e.g., "a", "b", "c", "d"
+    option: str       # The actual option content shown to the student
     is_correct: bool # True if correct, False otherwise
+    explanation: str  # Why this option is correct or incorrect
 
 class UserStats(TypedDict):
     curr_streak: int

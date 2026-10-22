@@ -1,20 +1,18 @@
 import asyncio
+import re
 from typing import TypedDict, Sequence, Annotated, Optional, List
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import SystemMessage, AIMessage
+from pydantic import BaseModel, Field
 from db.database import (
     a_upsert_user_stats,
     a_record_llm_event,
     a_record_probe,
     a_record_probe_answer,
 )
-
-import json
-import re
-import ast
 
 from prompts import base_prompt, probe_prompt
 from state import AgentState, UserStats, OptionItem
@@ -23,6 +21,18 @@ load_dotenv()
 
 TOPIC = "Linear Algebra"
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+
+class StructuredProbeOption(BaseModel):
+    label: str = Field(description="A short option label such as a, b, c, or d")
+    option: str = Field(description="The complete answer choice text shown to the student")
+    is_correct: bool = Field(description="Whether this option is correct")
+    explanation: str = Field(description="Why this option is correct or incorrect")
+
+class StructuredProbe(BaseModel):
+    question: str = Field(description="The probing question shown to the student")
+    options: list[StructuredProbeOption] = Field(min_length=2, max_length=8)
+
+structured_prober = llm.with_structured_output(StructuredProbe)
 
 async def _persist_event(thread_id: str, node_name: str, event_name: str, metadata: dict,
                          input_message_count: int):
@@ -91,47 +101,24 @@ async def prober_node(state: AgentState) -> dict:
     # entire accumulated conversation here: old probe metadata/questions can
     # distract the model from the current explanation and its required block.
     full_messages = [system_prompt, state["messages"][-1]]
-    response = await llm.ainvoke(full_messages)
-    event_log = log_event(state, "prober", "llm_generation_finished", response_length=len(response.content))
-
-    content = response.content
-    
-    # 1. Extract the options metadata block (e.g. [Options Meta: {"a": true, "b": false...}])
-    # The model may vary whitespace/capitalisation and may emit a Python-style
-    # dict (single quotes/True) despite the prompt asking for JSON.  Keep the
-    # student-facing output independent of that formatting variation.
-    meta_match = re.search(
-        r"\[\s*Options\s+Meta\s*:\s*(\{.*?\})\s*\]",
-        content,
-        re.IGNORECASE | re.DOTALL,
+    response = await structured_prober.ainvoke(full_messages)
+    event_log = log_event(
+        state,
+        "prober",
+        "llm_generation_finished",
+        response_length=len(response.question),
     )
-    
-    options_list: List[OptionItem] = []
-    if meta_match:
-        try:
-            raw_meta = meta_match.group(1)
-            try:
-                meta_dict = json.loads(raw_meta)
-            except json.JSONDecodeError:
-                # Tolerate {'a': True, 'b': False}, while still parsing only
-                # the already-delimited metadata object.
-                meta_dict = ast.literal_eval(raw_meta)
-            if not isinstance(meta_dict, dict):
-                raise ValueError("Options metadata must be an object")
-            # Convert dictionary into list of (option, isCorrect) structure
-            options_list = [{"option": k.strip().lower(), "is_correct": bool(v)} for k, v in meta_dict.items()]
-        except (ValueError, SyntaxError, TypeError):
-            # Do not invent a correct answer. An empty list makes the failure
-            # visible and prevents a bogus evaluation from being recorded.
-            options_list = []
 
-    # 2. Strip the meta tag so the student only sees the question and choices
-    clean_content = re.sub(
-        r"\[\s*Options\s+Meta\s*:\s*(\{.*?\})\s*\]",
-        "",
-        content,
-        flags=re.IGNORECASE | re.DOTALL,
-    ).strip()
+    clean_content = response.question.strip()
+    options_list: List[OptionItem] = [
+        {
+            "label": item.label.strip().lower(),
+            "option": item.option.strip(),
+            "is_correct": item.is_correct,
+            "explanation": item.explanation.strip(),
+        }
+        for item in response.options
+    ]
 
     current_stats = state.get("user_stats") or {
         "curr_streak": 0,
@@ -166,7 +153,11 @@ async def evaluate_node(state: AgentState) -> dict:
     options_list: List[OptionItem] = state.get("options_list", [])
     
     # Determine correct selections based on the options_list pairs
-    expected_correct = {item["option"] for item in options_list if item["is_correct"]}
+    expected_correct = {
+        item.get("label", item["option"])
+        for item in options_list
+        if item["is_correct"]
+    }
     
     # Score is 1 if student selections match expected correct options precisely
     score = 1 if student_selections == expected_correct else 0
@@ -190,6 +181,11 @@ async def evaluate_node(state: AgentState) -> dict:
         curr_streak = 0
         best_streak = stats["best_streak"]
         feedback = f"❌ **Incorrect.** Your selection was (`{student_ans_raw}`), but the correct options were: `{correct_str}`."
+
+    feedback += "\n\n**Option explanations:**\n" + "\n".join(
+        f"- Option {item.get('label', item['option'])}: {item['explanation']}"
+        for item in options_list
+    )
 
     updated_stats: UserStats = {
         "curr_streak": curr_streak,

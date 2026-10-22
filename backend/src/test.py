@@ -81,7 +81,7 @@ async def main():
                 probe_text = messages[-1].content if len(messages) >= 1 else "(Probe message missing)"
                 
                 options_list = result.get("options_list", [])
-                correct_options = [item["option"] for item in options_list if item["is_correct"]]
+                correct_options = [item["label"] for item in options_list if item["is_correct"]]
                 
                 print(f"\n[TUTOR EXPLANATION]:\n{tutor_text}")
                 print(f"\n[PROBING QUESTION]:\n{probe_text}")

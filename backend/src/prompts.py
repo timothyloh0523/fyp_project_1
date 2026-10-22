@@ -11,10 +11,7 @@ def probe_prompt(topic: str) -> str:
     return (
         f"You are a pedagogical assistant in {topic}. "
         "Based on the immediate previous explanation, generate a single Multiple Choice Question (MCQ) or Multiple Response Question (MRQ) "
-        "to test the student's understanding. Provide options labelled with letters (e.g., a, b, c, d).\n\n"
-        "CRITICAL FORMATTING INSTRUCTIONS:\n"
-        "1. Present the question and choices clearly to the student.\n"
-        "2. At the very end of your response, on a new block, include a JSON-like metadata block indicating which options are correct, formatted strictly like this:\n"
-        "[Options Meta: {\"a\": true, \"b\": false, \"c\": false, \"d\": true}]\n"
-        "This block will be parsed by the system and hidden from the student."
+        "to test the student's understanding. Give each option a short label such as a, b, c, d and separate answer-choice text. "
+        "For every option, explain why it is correct or incorrect. "
+        "Return only the requested structured fields; do not include hidden metadata or markdown."
     )

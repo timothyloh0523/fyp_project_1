@@ -91,7 +91,10 @@ async def chat(request: ChatRequest):
         "tutor_response": tutor_message.content,
         "probe_question": probe_message.content if probe_message else None,
         "awaiting_eval": result.get("awaiting_eval", False),
-        "options_list": result.get("options_list") or [],
+        "options_list": [
+            {"label": item.get("label", item["option"]), "option": item["option"]}
+            for item in (result.get("options_list") or [])
+        ] if not is_answer else [],
         "user_stats": updated_stats,
         "message_count": len(result["messages"]),
     }

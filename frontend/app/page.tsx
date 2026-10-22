@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type OptionItem = { option: string; is_correct: boolean };
+type OptionItem = { label: string; option: string; is_correct?: boolean; explanation?: string };
 type Stats = { curr_streak: number; best_streak: number; total_score: number; total_attempts: number };
 type ChatResponse = {
   thread_id: string;
@@ -206,23 +206,23 @@ export default function Home() {
               <div className="options">
                 {options.map((item) =>
                   <button
-                    className={`option ${selected.includes(item.option) ? "selected" : ""}`}
-                    key={item.option}
+                    className={`option ${selected.includes(item.label) ? "selected" : ""}`}
+                    key={item.label}
                     onClick={() =>
                       setSelected((current) =>
-                        current.includes(item.option)
-                          ? current.filter((value) => value !== item.option)
-                          : [...current, item.option])
+                        current.includes(item.label)
+                          ? current.filter((value) => value !== item.label)
+                          : [...current, item.label])
                     }
                   >
                     <span className="option-key">
-                      {item.option}
+                      {item.label}
                     </span>
                     <span>
-                      Option {item.option.toUpperCase()}
+                      {item.option}
                     </span>
                     <span className="option-check">
-                      {selected.includes(item.option) ? "✓" : ""}
+                      {selected.includes(item.label) ? "✓" : ""}
                     </span>
                   </button>
                 )}
@@ -238,7 +238,9 @@ export default function Home() {
           ) : (
             <div className="probe-empty">
               <span>☷</span>
-              <p>{probeFeedback ?? "Your next check-in will appear here after you ask a question."}</p>
+              <p className={probeFeedback ? "probe-feedback" : undefined}>
+                {probeFeedback ?? "Your next check-in will appear here after you ask a question."}
+              </p>
             </div>
           )}
         </aside>
