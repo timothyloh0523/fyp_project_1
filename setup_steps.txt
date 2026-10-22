@@ -1,0 +1,12 @@
+1. postgres setup:
+
+- open docker desktop app
+- run in git bash: ``` docker compose up -d ```
+
+2. backend setup:
+
+- run in powershell: ``` python -m uvicorn main:app --reload --port 8000 ```
+
+3. frontend setup (POWERSHELL):
+
+- run in powershell: ``` npm run dev ```

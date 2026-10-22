@@ -1,38 +1,30 @@
-import os, uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from pydantic import BaseModel
-from openai import OpenAI
-from langchain_core.messages import HumanMessage
+from fastapi.middleware.cors import CORSMiddleware
 
 # Local imports
-from graph import app_graph
+from api.routes import router as api_router
 
-# Load environment variables from .env
+# Load environment variables (.env)
 load_dotenv()
 
-app = FastAPI()
-client = OpenAI() # Automatically reads OPENAI_API_KEY from environment
+app = FastAPI(
+    title="LearnLoop Socratic Tutor API",
+    description="FastAPI + LangGraph backend with persistent PostgreSQL user stats",
+)
 
-class ChatRequest(BaseModel):
-    prompt: str
-    thread_id: str | None = None  # Optional thread ID for session continuity
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.post("/api/chat")
-def chat(request: ChatRequest):
-    # Generate a new session ID if one is not provided by the client
-    session_id = request.thread_id or str(uuid.uuid4())
-    config = {"configurable": {"thread_id": session_id}}
+# Include API endpoints from routes.py
+app.include_router(api_router)
 
-    # Invoke graph with user's new message
-    inputs = {"messages": [HumanMessage(content=request.prompt)]}
-    result = app_graph.invoke(inputs, config=config)
-    
-    # Extract latest AI response from state
-    latest_message = result["messages"][-1]
-    
-    return {
-        "thread_id": session_id,
-        "response": latest_message.content,
-        "message_count": len(result["messages"])
-    }
+
+@app.get("/")
+def health_check():
+    return {"status": "ok", "service": "LearnLoop API"}

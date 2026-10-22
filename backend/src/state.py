@@ -1,6 +1,10 @@
-from typing import TypedDict, Sequence, Annotated, Optional
+from typing import Annotated, TypedDict, Optional, List
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+class OptionItem(TypedDict):
+    option: str      # e.g., "a", "b", "c", "d" or option text
+    is_correct: bool # True if correct, False otherwise
 
 class UserStats(TypedDict):
     curr_streak: int
@@ -9,8 +13,9 @@ class UserStats(TypedDict):
     total_attempts: int
 
 class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
     awaiting_eval: bool
-    coin_result: Optional[str]
+    options_list: Optional[List[OptionItem]]  
+    user_id: Optional[str]
+    user_stats: Optional[UserStats]
     score: Optional[int]
-    user_stats: UserStats

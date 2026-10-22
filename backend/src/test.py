@@ -1,6 +1,6 @@
 #!/usr/bin/env python
- 
-# Test file for the chat application
+
+# Test file for the chat application (Debugging Edition)
 
 import sys
 import uuid
@@ -8,19 +8,21 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
 from graph import app_graph
+from db.database import get_user_stats
 
 load_dotenv()
 
 def main():
     session_id = str(uuid.uuid4())
+    user_id = "cli_user"  # Default user ID for testing
     config = {"configurable": {"thread_id": session_id}}
 
-    print("=== LearnLoop CLI Session ===")
+    print("=== LearnLoop CLI [DEBUG MODE] ===")
     print(f"Session Thread ID: {session_id}")
     print("Commands:")
-    print("  <your question>     : Ask a new question (default behaviour, ignores active probing check)")
-    print("  /a <your answer>    : Answer the active probing question")
-    print("  /exit OR /quit           : Terminate session\n")
+    print("  <your question>     : Ask a new tutor question")
+    print("  /a <option(s)>      : Answer active probe (e.g., /a a or /a a, c)")
+    print("  /exit OR /quit      : Terminate session\n")
 
     while True:
         try:
@@ -31,55 +33,67 @@ def main():
                 print("Ending session. Goodbye!")
                 break
 
-            # Get current graph state to check if we are currently awaiting evaluation
+            # Get current graph state
             current_state = app_graph.get_state(config)
             is_awaiting_eval = current_state.values.get("awaiting_eval", False) if current_state.values else False
 
-            # Case 1: User explicitly wants to answer the probing question using /a
-            if user_input.startswith("/a"):
+            # Check if user explicitly used /a
+            is_explicit_answer = user_input.startswith("/a")
+            if is_explicit_answer:
                 clean_answer = user_input[2:].strip()
                 if not clean_answer:
-                    print("[System]: Please provide your answer after /a (e.g. /a eigenvector)")
+                    print("[DEBUG System]: Please provide your answer choice after /a (e.g. /a a)")
                     continue
-                
-                if not is_awaiting_eval:
-                    print("[System]: There is currently no active probing question to answer. Treating as a new question...\n")
-                    user_input = clean_answer
-                else:
-                    user_input = clean_answer
-
-            # Case 2: Default behaviour - user typed a prompt without /a
+                user_input = clean_answer
             else:
-                # If a probing question was active, explicitly clear awaiting_eval state to ask a new question
+                # If a probe was active and user typed a regular question instead, clear state
                 if is_awaiting_eval:
-                    app_graph.update_state(config, {"awaiting_eval": False})
+                    app_graph.update_state(config, {"awaiting_eval": False, "options_list": None})
 
-            inputs = {"messages": [HumanMessage(content=user_input)]}
+            # Fetch existing stats from DB
+            existing_stats = get_user_stats(user_id)
+
+            inputs = {
+                "messages": [HumanMessage(content=user_input)],
+                "awaiting_eval": is_explicit_answer and is_awaiting_eval,
+                "user_id": user_id,
+                "user_stats": existing_stats
+            }
+            
             result = app_graph.invoke(inputs, config=config)
-
-            # Update user_stats if evaluation just completed
-
+            messages = result.get("messages", [])
+            
+            # 1. If evaluation just completed
             if not result.get("awaiting_eval") and "user_stats" in result:
-                board = result["user_stats"]
+                stats = result["user_stats"]
                 score = result.get("score", 0)
-                print(f"\n[Evaluation Response]:\n{latest_message.content}\n")
-                print("--------------------------------------------------")
-                print(f"   USER STATISTICS (Current Run):")
-                print(f"   • Result         : {'Correct (1/1)' if score == 1 else 'Incorrect (0/1)'}")
-                print(f"   • Total Attempts : {board['total_attempts']}")
-                print(f"   • Total Score    : {board['total_score']} / {board['total_attempts']}")
-                print(f"   • Current Streak : {board['curr_streak']} ")
-                print(f"   • Best Streak    : {board['best_streak']} ")
-                print("--------------------------------------------------\n")
+                latest_message = messages[-1] if messages else None
+                eval_text = latest_message.content if latest_message else ""
+                
+                print(f"\n[EVALUATION FEEDBACK]:\n{eval_text}")
+                print(f"[STATS UPDATE] Score: {score} | Streak: {stats['curr_streak']} (Best: {stats['best_streak']}) | Total: {stats['total_score']}/{stats['total_attempts']}\n" + "-"*50)
             
-            latest_message = result["messages"][-1]
+            # 2. If a new probing question was generated (Tutor explanation + Prober question are both in messages)
+            elif result.get("awaiting_eval"):
+                # Typically, messages[-2] is the tutor response and messages[-1] is the prober question
+                tutor_text = messages[-2].content if len(messages) >= 2 else "(Tutor message missing)"
+                probe_text = messages[-1].content if len(messages) >= 1 else "(Probe message missing)"
+                
+                options_list = result.get("options_list", [])
+                correct_options = [item["option"] for item in options_list if item["is_correct"]]
+                
+                print(f"\n[TUTOR EXPLANATION]:\n{tutor_text}")
+                print(f"\n[PROBING QUESTION]:\n{probe_text}")
+                print(f"\n--- [DEBUG STATE INFO] ---")
+                print(f"• Raw Options Meta List : {options_list}")
+                print(f"• Expected Correct Key(s): {correct_options}")
+                print(f"--------------------------\n")
             
-            # Print execution mode feedback
-            if result.get("awaiting_eval"):
-                print(f"\n[Tutor Response + Probing Question]:\n{latest_message.content}\n")
-                print("--> (Side Panel: Probing question active. Type '/a <answer>' to answer it, or just type your next question to ignore it.)\n")
+            # 3. Regular Tutor Response (Fallback if no prober ran)
             else:
-                print(f"\n[Evaluation Response]:\n{latest_message.content}\n")
+                latest_message = messages[-1] if messages else None
+                response_text = latest_message.content if latest_message else ""
+                print(f"\n[TUTOR RESPONSE]:\n{response_text}\n")
 
         except (KeyboardInterrupt, EOFError):
             print("\nSession interrupted. Goodbye!")
