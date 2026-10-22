@@ -1,10 +1,16 @@
+import asyncio
 from typing import TypedDict, Sequence, Annotated, Optional, List
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import SystemMessage, AIMessage
-from db.database import upsert_user_stats
+from db.database import (
+    a_upsert_user_stats,
+    a_record_llm_event,
+    a_record_probe,
+    a_record_probe_answer,
+)
 
 import json
 import re
@@ -18,10 +24,55 @@ load_dotenv()
 TOPIC = "Linear Algebra"
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
-def tutor_node(state: AgentState) -> dict:
+async def _persist_event(thread_id: str, node_name: str, event_name: str, metadata: dict,
+                         input_message_count: int):
+    try:
+        await a_record_llm_event(
+            thread_id,
+            node_name,
+            event_name,
+            model_name="gpt-4o-mini" if node_name in {"tutor", "prober"} else None,
+            input_message_count=input_message_count,
+            metadata=metadata,
+        )
+    except Exception as error:
+        print(f"[event] persist failed: {type(error).__name__}")
+
+async def _persist_evaluation(user_id: str, stats: UserStats, probe_id: int | None,
+                              raw_answer: str, selected_options: list[str], score: int,
+                              feedback: str):
+    try:
+        await a_upsert_user_stats(user_id, stats)
+        if probe_id:
+            await a_record_probe_answer(
+                probe_id, raw_answer, selected_options, score, feedback
+            )
+    except Exception as error:
+        print(f"[db] evaluation persist failed: {type(error).__name__}")
+
+def log_event(state: AgentState, node_name: str, event_name: str, **metadata):
+    """Persist telemetry and keep a small copy in graph state for debugging."""
+    thread_id = state.get("thread_id")
+    print(f"[event] {node_name}:{event_name}")
+    event = {"node": node_name, "event": event_name, "metadata": metadata}
+    if thread_id:
+        asyncio.create_task(
+            _persist_event(
+                thread_id,
+                node_name,
+                event_name,
+                metadata,
+                len(state.get("messages", [])),
+            )
+        )
+    return [*state.get("event_log", []), event]
+
+async def tutor_node(state: AgentState) -> dict:
+    event_log = log_event(state, "tutor", "llm_generation_started")
     system_prompt = SystemMessage(content=base_prompt(TOPIC))
     full_messages = [system_prompt] + list(state["messages"])
-    response = llm.invoke(full_messages)
+    response = await llm.ainvoke(full_messages)
+    event_log = log_event(state, "tutor", "llm_generation_finished", response_length=len(response.content))
     
     return {
         "messages": [response],
@@ -29,15 +80,19 @@ def tutor_node(state: AgentState) -> dict:
         # A tutor turn starts a new probe.  Clear the previous probe's
         # metadata explicitly; prober_node will replace it immediately.
         "options_list": None,
+        "event_log": event_log,
     }
 
-def prober_node(state: AgentState) -> dict:
+async def prober_node(state: AgentState) -> dict:
+    event_log = log_event(state, "prober", "received_tutor_response")
+    event_log = log_event(state, "prober", "llm_generation_started")
     system_prompt = SystemMessage(content=probe_prompt(TOPIC))
     # The tutor node has just appended the explanation.  Do not send the
     # entire accumulated conversation here: old probe metadata/questions can
     # distract the model from the current explanation and its required block.
     full_messages = [system_prompt, state["messages"][-1]]
-    response = llm.invoke(full_messages)
+    response = await llm.ainvoke(full_messages)
+    event_log = log_event(state, "prober", "llm_generation_finished", response_length=len(response.content))
 
     content = response.content
     
@@ -85,13 +140,20 @@ def prober_node(state: AgentState) -> dict:
         "total_attempts": 0,
     }
     
+    probe_id = None
+    if state.get("thread_id"):
+        probe_id = await a_record_probe(state["thread_id"], clean_content, options_list)
+
     return {
         "messages": [AIMessage(content=clean_content)],
         "awaiting_eval": True,
         "options_list": options_list,  # Stored background list of pairs
-        "user_stats": current_stats
+        "user_stats": current_stats,
+        "current_probe_id": probe_id,
+        "event_log": event_log,
     }
-def evaluate_node(state: AgentState) -> dict:
+async def evaluate_node(state: AgentState) -> dict:
+    event_log = log_event(state, "evaluate", "answer_evaluation_started")
     last_msg = state["messages"][-1].content
     
     # Clean input if sent via CLI '/a' command (e.g. "/a a, c" -> "a, c")
@@ -137,7 +199,18 @@ def evaluate_node(state: AgentState) -> dict:
     }
 
     user_id = state.get("user_id", "default_user")
-    upsert_user_stats(user_id, updated_stats)
+    asyncio.create_task(
+        _persist_evaluation(
+            user_id,
+            updated_stats,
+            state.get("current_probe_id"),
+            student_ans_raw,
+            sorted(student_selections),
+            score,
+            feedback,
+        )
+    )
+    event_log = log_event(state, "evaluate", "answer_evaluation_finished", score=score)
 
     return {
         "messages": [AIMessage(content=feedback)],
@@ -145,6 +218,7 @@ def evaluate_node(state: AgentState) -> dict:
         "options_list": None,
         "score": score,
         "user_stats": updated_stats,
+        "event_log": event_log,
     }
 
 def route_tutor(state: AgentState) -> str:

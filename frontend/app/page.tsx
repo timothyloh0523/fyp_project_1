@@ -7,6 +7,8 @@ type Stats = { curr_streak: number; best_streak: number; total_score: number; to
 type ChatResponse = {
   thread_id: string;
   response: string;
+  tutor_response: string;
+  probe_question: string | null;
   awaiting_eval: boolean;
   options_list: OptionItem[];
   user_stats: Stats;
@@ -30,6 +32,8 @@ export default function Home() {
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState<OptionItem[]>([]);
+  const [probeQuestion, setProbeQuestion] = useState<string | null>(null);
+  const [probeFeedback, setProbeFeedback] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,9 +54,17 @@ export default function Home() {
       const result = await postChat(threadId, prompt);
       setThreadId(result.thread_id);
       setOptions(result.options_list ?? []);
+      setProbeQuestion(result.probe_question);
+      setProbeFeedback(null);
       setSelected([]);
       setStats(result.user_stats);
-      setMessages((current) => [...current, { role: "assistant", content: result.response }]);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: result.tutor_response || result.response,
+        },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -68,7 +80,20 @@ export default function Home() {
 
   async function submitOptions() {
     if (!canSubmit) return;
-    await send(`/a ${selected.join(", ")}`, `Selected: ${selected.join(", ")}`);
+    setLoading(true);
+    setError("");
+    try {
+      const result = await postChat(threadId, `/a ${selected.join(", ")}`);
+      setThreadId(result.thread_id);
+      setOptions([]);
+      setSelected([]);
+      setProbeFeedback(result.response);
+      setStats(result.user_stats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -174,7 +199,7 @@ export default function Home() {
           {options.length > 0 ? (
             <>
               <p className="probe-copy">
-                {messages.at(-1)?.content}
+                {probeQuestion}
               </p>
               <p className="hint">Select all that apply
               </p>
@@ -213,7 +238,7 @@ export default function Home() {
           ) : (
             <div className="probe-empty">
               <span>☷</span>
-              <p>Your next check-in will appear here after you ask a question.</p>
+              <p>{probeFeedback ?? "Your next check-in will appear here after you ask a question."}</p>
             </div>
           )}
         </aside>

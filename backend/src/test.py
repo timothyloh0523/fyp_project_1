@@ -4,6 +4,7 @@
 
 import sys
 import uuid
+import asyncio
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
@@ -12,7 +13,7 @@ from db.database import get_user_stats
 
 load_dotenv()
 
-def main():
+async def main():
     session_id = str(uuid.uuid4())
     user_id = "cli_user"  # Default user ID for testing
     config = {"configurable": {"thread_id": session_id}}
@@ -60,7 +61,7 @@ def main():
                 "user_stats": existing_stats
             }
             
-            result = app_graph.invoke(inputs, config=config)
+            result = await app_graph.ainvoke(inputs, config=config)
             messages = result.get("messages", [])
             
             # 1. If evaluation just completed
@@ -100,4 +101,4 @@ def main():
             sys.exit(0)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

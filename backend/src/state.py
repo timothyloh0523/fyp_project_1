@@ -19,3 +19,6 @@ class AgentState(TypedDict):
     user_id: Optional[str]
     user_stats: Optional[UserStats]
     score: Optional[int]
+    thread_id: Optional[str]
+    current_probe_id: Optional[int]
+    event_log: List[dict]
