@@ -46,7 +46,7 @@ async def _persist_event(thread_id: str, node_name: str, event_name: str, metada
             metadata=metadata,
         )
     except Exception as error:
-        print(f"[event] persist failed: {type(error).__name__}")
+        print(f"[db] event persist failed: {type(error).__name__}")
 
 async def _persist_evaluation(user_id: str, stats: UserStats, probe_id: int | None,
                               raw_answer: str, selected_options: list[str], score: int,
@@ -63,7 +63,7 @@ async def _persist_evaluation(user_id: str, stats: UserStats, probe_id: int | No
 def log_event(state: AgentState, node_name: str, event_name: str, **metadata):
     """Persist telemetry and keep a small copy in graph state for debugging."""
     thread_id = state.get("thread_id")
-    print(f"[event] {node_name}:{event_name}")
+    print(f"[event] {node_name}:{event_name}", flush=True)
     event = {"node": node_name, "event": event_name, "metadata": metadata}
     if thread_id:
         asyncio.create_task(
@@ -130,6 +130,7 @@ async def prober_node(state: AgentState) -> dict:
     probe_id = None
     if state.get("thread_id"):
         probe_id = await a_record_probe(state["thread_id"], clean_content, options_list)
+
 
     return {
         "messages": [AIMessage(content=clean_content)],

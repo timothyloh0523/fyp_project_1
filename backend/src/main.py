@@ -9,7 +9,7 @@ from api.routes import router as api_router
 load_dotenv()
 
 app = FastAPI(
-    title="LearnLoop Socratic Tutor API",
+    title="LearnLoop Guiding Tutor API",
     description="FastAPI + LangGraph backend with persistent PostgreSQL user stats",
 )
 

@@ -35,7 +35,6 @@ class UserStatsResponse(BaseModel):
 async def chat(request: ChatRequest):
     # 1. Generate or re-use session ID
     session_id = request.thread_id or str(uuid.uuid4())
-    print(f"[chat] user={request.user_id} thread={session_id}")
     config = {"configurable": {"thread_id": session_id}}
 
     # 2. Check if the prompt is an explicit answer submission
@@ -82,7 +81,6 @@ async def chat(request: ChatRequest):
         latest_message.content,
         "evaluate" if is_answer else "prober",
     ))
-    print(f"[chat] complete thread={session_id} answer={is_answer}")
 
     return {
         "thread_id": session_id,

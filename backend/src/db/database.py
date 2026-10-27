@@ -10,11 +10,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Match the credentials set in docker-compose.yml
-DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "fyp_postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS", "password")
+DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
 
 _pool = None
 _pool_lock = threading.Lock()
@@ -33,6 +34,11 @@ def get_db_connection():
                     dbname=DB_NAME,
                     user=DB_USER,
                     password=DB_PASS,
+                    connect_timeout=DB_CONNECT_TIMEOUT,
+                    keepalives=1,
+                    keepalives_idle=10,
+                    keepalives_interval=5,
+                    keepalives_count=3,
                     cursor_factory=RealDictCursor,
                 )
     return _pool.getconn()
@@ -82,7 +88,10 @@ def get_user_stats(user_id: str):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM user_stats WHERE user_id = %s;", (user_id,))
+            cursor.execute(
+                "SELECT * FROM user_stats WHERE user_id = %s;",
+                (user_id,),
+            )
             record = cursor.fetchone()
             if record:
                 return {

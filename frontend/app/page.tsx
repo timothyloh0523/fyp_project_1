@@ -104,7 +104,7 @@ export default function Home() {
             LEARNLOOP / LINEAR ALGEBRA
           </p>
           <h1>
-            Socratic tutor
+            LearnLoop tutor
           </h1>
         </div>
         <div className="stats">

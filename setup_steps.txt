@@ -3,10 +3,10 @@
 - open docker desktop app
 - run in git bash: ``` docker compose up -d ```
 
-2. backend setup:
+2. backend setup (cd backend/src):
 
 - run in powershell: ``` python -m uvicorn main:app --reload --port 8000 ```
 
-3. frontend setup (POWERSHELL):
+3. frontend setup (cd frontend):
 
 - run in powershell: ``` npm run dev ```
