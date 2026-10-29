@@ -1,8 +1,9 @@
 import uuid
 import re
 import asyncio
+from typing import Literal
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 
 # Local imports
@@ -12,6 +13,9 @@ from db.database import (
     a_upsert_user_stats,
     a_ensure_chat_session,
     a_record_message,
+    a_ensure_user,
+    a_get_user_profile,
+    a_update_user_goals,
 )
 
 router = APIRouter(prefix="/api", tags=["Chat & User Stats"])
@@ -29,6 +33,20 @@ class UserStatsResponse(BaseModel):
     best_streak: int
     total_score: int
     total_attempts: int
+    weekly_score: int
+    weekly_score_week: str | None
+
+class UserGoalRequest(BaseModel):
+    goal_type: Literal["weekly_score"]
+    number: int = Field(ge=1)
+    period: Literal["week"] = "week"
+    enabled: bool = True
+
+class UserProfileResponse(BaseModel):
+    user_id: str
+    display_name: str | None = None
+    email: str | None = None
+    goals: list[dict] = Field(default_factory=list)
 
 
 @router.post("/chat")
@@ -41,6 +59,8 @@ async def chat(request: ChatRequest):
     is_answer = request.prompt.strip().startswith("/a")
 
     # 3. Retrieve persistent user stats from DB to hydrate state
+    await a_ensure_user(request.user_id)
+    user_profile = await a_get_user_profile(request.user_id)
     existing_stats = await a_get_user_stats(request.user_id)
     await a_ensure_chat_session(session_id, request.user_id, "Linear Algebra")
 
@@ -52,6 +72,7 @@ async def chat(request: ChatRequest):
         "user_stats": existing_stats,
         "thread_id": session_id,
         "event_log": [],
+        "user_goals": user_profile.get("goals", []),
     }
 
     # 5. Invoke LangGraph state graph
@@ -94,6 +115,8 @@ async def chat(request: ChatRequest):
             for item in (result.get("options_list") or [])
         ] if not is_answer else [],
         "user_stats": updated_stats,
+        "score": result.get("score"),
+        "weekly_score": updated_stats.get("weekly_score", 0),
         "message_count": len(result["messages"]),
     }
 
@@ -104,6 +127,16 @@ async def fetch_user_stats(user_id: str):
     stats = await a_get_user_stats(user_id)
     return {"user_id": user_id, **stats}
 
+@router.get("/users/{user_id}", response_model=UserProfileResponse)
+async def fetch_user_profile(user_id: str):
+    await a_ensure_user(user_id)
+    return await a_get_user_profile(user_id)
+
+@router.put("/users/{user_id}/goals", response_model=UserProfileResponse)
+async def update_user_goals(user_id: str, goals: list[UserGoalRequest]):
+    saved_goals = [goal.model_dump() for goal in goals]
+    return await a_update_user_goals(user_id, saved_goals)
+
 
 @router.post("/stats/{user_id}/reset")
 async def reset_user_stats(user_id: str):
@@ -113,6 +146,8 @@ async def reset_user_stats(user_id: str):
         "best_streak": 0,
         "total_score": 0,
         "total_attempts": 0,
+        "weekly_score": 0,
+        "weekly_score_week": None,
     }
     await a_upsert_user_stats(user_id, zero_stats)
     return {"message": f"Stats for user '{user_id}' reset successfully."}

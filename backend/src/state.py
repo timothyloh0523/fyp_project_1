@@ -13,6 +13,14 @@ class UserStats(TypedDict):
     best_streak: int
     total_score: int
     total_attempts: int
+    weekly_score: int
+    weekly_score_week: str | None
+
+class UserGoal(TypedDict):
+    goal_type: str       # Currently: "weekly_score"
+    number: int          # Target number for the goal
+    period: str          # Currently: "week"
+    enabled: bool
 
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
@@ -24,3 +32,4 @@ class AgentState(TypedDict):
     thread_id: Optional[str]
     current_probe_id: Optional[int]
     event_log: List[dict]
+    user_goals: Optional[List[UserGoal]]

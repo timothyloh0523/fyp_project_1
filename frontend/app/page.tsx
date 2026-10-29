@@ -3,7 +3,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type OptionItem = { label: string; option: string; is_correct?: boolean; explanation?: string };
-type Stats = { curr_streak: number; best_streak: number; total_score: number; total_attempts: number };
+type Stats = { curr_streak: number; best_streak: number; total_score: number; total_attempts: number; weekly_score: number };
+type GoalType = "weekly_score" | "weekly_win_rate" | "weekly_attempts";
+type UserGoal = { goal_type: GoalType; number: number; period: "week"; enabled: boolean };
 type ChatResponse = {
   thread_id: string;
   response: string;
@@ -12,10 +14,18 @@ type ChatResponse = {
   awaiting_eval: boolean;
   options_list: OptionItem[];
   user_stats: Stats;
+  score?: number;
+  weekly_score?: number;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const USER_ID = "default_user";
+const DEFAULT_GOAL: UserGoal = { goal_type: "weekly_score", number: 10, period: "week", enabled: true };
+const GOAL_LABELS: Record<GoalType, string> = {
+  weekly_score: "Correct answers this week",
+  weekly_win_rate: "Weekly win rate",
+  weekly_attempts: "Questions attempted this week",
+};
 
 async function postChat(threadId: string | null, prompt: string): Promise<ChatResponse> {
   const response = await fetch(`${API_URL}/api/chat`, {
@@ -38,11 +48,25 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [goal, setGoal] = useState<UserGoal>(DEFAULT_GOAL);
+  const [weeklyCorrect, setWeeklyCorrect] = useState(0);
+  const [showGoalEditor, setShowGoalEditor] = useState(false);
+  const [goalDraft, setGoalDraft] = useState(String(DEFAULT_GOAL.number));
 
   useEffect(() => {
-    fetch(`${API_URL}/api/stats/${USER_ID}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then(setStats).catch(() => undefined);
+    Promise.all([
+      fetch(`${API_URL}/api/stats/${USER_ID}`).then((response) => response.ok ? response.json() : null),
+      fetch(`${API_URL}/api/users/${USER_ID}`).then((response) => response.ok ? response.json() : null),
+    ]).then(([userStats, profile]) => {
+      if (userStats) {
+        setStats(userStats);
+        setWeeklyCorrect(userStats.weekly_score ?? 0);
+      }
+      const savedGoal = profile?.goals?.[0] as UserGoal | undefined;
+      const currentGoal = savedGoal ?? DEFAULT_GOAL;
+      setGoal(currentGoal);
+      setGoalDraft(String(currentGoal.number));
+    }).catch(() => undefined);
   }, []);
 
   const canSubmit = useMemo(() => selected.length > 0 && !loading, [selected, loading]);
@@ -89,12 +113,32 @@ export default function Home() {
       setSelected([]);
       setProbeFeedback(result.response);
       setStats(result.user_stats);
+      setWeeklyCorrect(result.weekly_score ?? result.user_stats.weekly_score ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
   }
+
+  async function saveGoal(event: FormEvent) {
+    event.preventDefault();
+    const target = Math.max(1, Number.parseInt(goalDraft, 10) || DEFAULT_GOAL.number);
+    const nextGoal: UserGoal = { goal_type: "weekly_score", number: target, period: "week", enabled: true };
+    const response = await fetch(`${API_URL}/api/users/${USER_ID}/goals`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([nextGoal]),
+    });
+    if (response.ok) {
+      setGoal(nextGoal);
+      setShowGoalEditor(false);
+    } else {
+      setError("Could not save your weekly goal.");
+    }
+  }
+
+  const progress = Math.min(100, Math.round((weeklyCorrect / goal.number) * 100));
 
   return (
     <main className="shell">
@@ -107,9 +151,27 @@ export default function Home() {
             LearnLoop tutor
           </h1>
         </div>
-        <div className="stats">
-          Score <strong>{stats?.total_score ?? 0}</strong> · Streak <strong>{stats?.curr_streak ?? 0}</strong>
-        </div>
+        <section className="user-stats-card header-user-stats" aria-label="User stats">
+          <div className="user-stats-heading">
+            <div>
+              <p className="eyebrow">YOUR PROGRESS</p>
+              <h2>User stats</h2>
+            </div>
+            <span className="stats-badge">✦</span>
+          </div>
+          <div className="lifetime-stats">
+            <div><span>Lifetime score</span><strong>{stats?.total_score ?? 0}</strong></div>
+            <div><span>Streak</span><strong>{stats?.curr_streak ?? 0}</strong></div>
+          </div>
+          <div className="weekly-goal">
+            <div className="goal-title">
+              <span>{GOAL_LABELS[goal.goal_type]}</span>
+              <strong>{weeklyCorrect} / {goal.number}</strong>
+            </div>
+            <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
+            <div className="goal-footer"><span>{progress}% complete</span><button onClick={() => setShowGoalEditor(true)}>Set goal</button></div>
+          </div>
+        </section>
       </header>
       <div className="workspace">
         <section className="chat-panel">
@@ -182,7 +244,30 @@ export default function Home() {
             </button>
           </form>
         </section>
-        <aside className="probe-panel">
+        <div className="right-rail">
+          <section className="user-stats-card" aria-label="User stats">
+            <div className="user-stats-heading">
+              <div>
+                <p className="eyebrow">YOUR PROGRESS</p>
+                <h2>User stats</h2>
+              </div>
+              <span className="stats-badge">✦</span>
+            </div>
+            <div className="lifetime-stats">
+              <div><span>Lifetime score</span><strong>{stats?.total_score ?? 0}</strong></div>
+              <div><span>Streak</span><strong>{stats?.curr_streak ?? 0}</strong></div>
+            </div>
+            <div className="weekly-goal">
+              <div className="goal-title">
+                <span>{GOAL_LABELS[goal.goal_type]}</span>
+                <strong>{weeklyCorrect} / {goal.number}</strong>
+              </div>
+              <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
+              <div className="goal-footer"><span>{progress}% complete</span><button onClick={() => setShowGoalEditor(true)}>Set goal</button></div>
+            </div>
+          </section>
+
+          <aside className="probe-panel">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">
@@ -243,12 +328,37 @@ export default function Home() {
               </p>
             </div>
           )}
-        </aside>
+          </aside>
+        </div>
       </div>
       {error && (
         <p className="error" role="alert">
           {error}
         </p>
+      )}
+      {showGoalEditor && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowGoalEditor(false)}>
+          <form className="goal-modal" onSubmit={saveGoal} onClick={(event) => event.stopPropagation()}>
+            <p className="eyebrow">WEEKLY GOAL</p>
+            <h2>Choose your target</h2>
+            <label>
+              Goal type
+              <select value={goal.goal_type} disabled>
+                <option value="weekly_score">Correct answers this week</option>
+                <option value="weekly_win_rate">Weekly win rate (coming soon)</option>
+                <option value="weekly_attempts">Questions attempted (coming soon)</option>
+              </select>
+            </label>
+            <label>
+              Correct answers
+              <input type="number" min="1" value={goalDraft} onChange={(event) => setGoalDraft(event.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowGoalEditor(false)}>Cancel</button>
+              <button type="submit">Save goal</button>
+            </div>
+          </form>
+        </div>
       )}
     </main>
   );

@@ -60,14 +60,21 @@ def upsert_user_stats(user_id: str, user_stats: dict):
     try:
         with conn.cursor() as cursor:
             query = """
-            INSERT INTO user_stats (user_id, curr_streak, best_streak, total_score, total_attempts, updated_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
+            INSERT INTO user_stats
+                (user_id, curr_streak, best_streak, total_score, total_attempts, weekly_score, weekly_score_week, updated_at)
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                date_trunc('week', timezone('Asia/Singapore', CURRENT_TIMESTAMP))::date,
+                NOW()
+            )
             ON CONFLICT (user_id) 
             DO UPDATE SET
                 curr_streak = EXCLUDED.curr_streak,
                 best_streak = GREATEST(user_stats.best_streak, EXCLUDED.best_streak),
                 total_score = EXCLUDED.total_score,
                 total_attempts = EXCLUDED.total_attempts,
+                weekly_score = EXCLUDED.weekly_score,
+                weekly_score_week = EXCLUDED.weekly_score_week,
                 updated_at = NOW();
             """
             cursor.execute(query, (
@@ -75,7 +82,8 @@ def upsert_user_stats(user_id: str, user_stats: dict):
                 user_stats["curr_streak"],
                 user_stats["best_streak"],
                 user_stats["total_score"],
-                user_stats["total_attempts"]
+                user_stats["total_attempts"],
+                user_stats.get("weekly_score", 0),
             ))
             conn.commit()
     finally:
@@ -89,7 +97,15 @@ def get_user_stats(user_id: str):
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM user_stats WHERE user_id = %s;",
+                """SELECT curr_streak, best_streak, total_score, total_attempts,
+                    weekly_score_week,
+                    CASE
+                        WHEN weekly_score_week = date_trunc(
+                            'week', timezone('Asia/Singapore', CURRENT_TIMESTAMP)
+                        )::date
+                        THEN weekly_score ELSE 0
+                    END AS weekly_score
+                    FROM user_stats WHERE user_id = %s;""",
                 (user_id,),
             )
             record = cursor.fetchone()
@@ -98,9 +114,19 @@ def get_user_stats(user_id: str):
                     "curr_streak": record["curr_streak"],
                     "best_streak": record["best_streak"],
                     "total_score": record["total_score"],
-                    "total_attempts": record["total_attempts"]
+                    "total_attempts": record["total_attempts"],
+                    "weekly_score": record["weekly_score"],
+                    "weekly_score_week": record["weekly_score_week"].isoformat()
+                        if record["weekly_score_week"] else None,
                 }
-            return {"curr_streak": 0, "best_streak": 0, "total_score": 0, "total_attempts": 0}
+            return {
+                "curr_streak": 0,
+                "best_streak": 0,
+                "total_score": 0,
+                "total_attempts": 0,
+                "weekly_score": 0,
+                "weekly_score_week": None,
+            }
     finally:
         release_db_connection(conn)
 
@@ -182,6 +208,53 @@ def record_probe_answer(probe_id: int, raw_answer: str, selected_options: list[s
     finally:
         release_db_connection(conn)
 
+def ensure_user(user_id: str):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO users (user_id)
+                VALUES (%s)
+                ON CONFLICT (user_id) DO UPDATE SET updated_at = NOW()""",
+                (user_id,),
+            )
+            conn.commit()
+    finally:
+        release_db_connection(conn)
+
+def get_user_profile(user_id: str):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT user_id, display_name, email, goals FROM users WHERE user_id = %s;",
+                (user_id,),
+            )
+            record = cursor.fetchone()
+            if record:
+                return dict(record)
+            return {"user_id": user_id, "display_name": None, "email": None, "goals": []}
+    finally:
+        release_db_connection(conn)
+
+def update_user_goals(user_id: str, goals: list[dict]):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO users (user_id, goals, updated_at)
+                VALUES (%s, %s::jsonb, NOW())
+                ON CONFLICT (user_id) DO UPDATE
+                SET goals = EXCLUDED.goals, updated_at = NOW()
+                RETURNING user_id, display_name, email, goals""",
+                (user_id, json.dumps(goals)),
+            )
+            record = dict(cursor.fetchone())
+            conn.commit()
+            return record
+    finally:
+        release_db_connection(conn)
+
 # Async adapters keep the synchronous psycopg2 implementation off FastAPI's
 # event loop.
 async def a_get_user_stats(user_id: str):
@@ -208,3 +281,12 @@ async def a_record_probe_answer(probe_id: int, raw_answer: str, selected_options
     return await asyncio.to_thread(
         record_probe_answer, probe_id, raw_answer, selected_options, score, feedback
     )
+
+async def a_ensure_user(user_id: str):
+    return await asyncio.to_thread(ensure_user, user_id)
+
+async def a_get_user_profile(user_id: str):
+    return await asyncio.to_thread(get_user_profile, user_id)
+
+async def a_update_user_goals(user_id: str, goals: list[dict]):
+    return await asyncio.to_thread(update_user_goals, user_id, goals)

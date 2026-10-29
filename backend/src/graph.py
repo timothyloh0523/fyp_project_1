@@ -48,11 +48,10 @@ async def _persist_event(thread_id: str, node_name: str, event_name: str, metada
     except Exception as error:
         print(f"[db] event persist failed: {type(error).__name__}")
 
-async def _persist_evaluation(user_id: str, stats: UserStats, probe_id: int | None,
-                              raw_answer: str, selected_options: list[str], score: int,
-                              feedback: str):
+async def _persist_probe_answer(probe_id: int | None, raw_answer: str,
+                                selected_options: list[str], score: int,
+                                feedback: str):
     try:
-        await a_upsert_user_stats(user_id, stats)
         if probe_id:
             await a_record_probe_answer(
                 probe_id, raw_answer, selected_options, score, feedback
@@ -125,6 +124,8 @@ async def prober_node(state: AgentState) -> dict:
         "best_streak": 0,
         "total_score": 0,
         "total_attempts": 0,
+        "weekly_score": 0,
+        "weekly_score_week": None,
     }
     
     probe_id = None
@@ -168,10 +169,13 @@ async def evaluate_node(state: AgentState) -> dict:
         "best_streak": 0,
         "total_score": 0,
         "total_attempts": 0,
+        "weekly_score": 0,
+        "weekly_score_week": None,
     }
 
     total_attempts = stats["total_attempts"] + 1
     total_score = stats["total_score"] + score
+    weekly_score = stats.get("weekly_score", 0) + score
 
     if score == 1:
         curr_streak = stats["curr_streak"] + 1
@@ -193,13 +197,14 @@ async def evaluate_node(state: AgentState) -> dict:
         "best_streak": best_streak,
         "total_score": total_score,
         "total_attempts": total_attempts,
+        "weekly_score": weekly_score,
+        "weekly_score_week": stats.get("weekly_score_week"),
     }
 
     user_id = state.get("user_id", "default_user")
+    await a_upsert_user_stats(user_id, updated_stats)
     asyncio.create_task(
-        _persist_evaluation(
-            user_id,
-            updated_stats,
+        _persist_probe_answer(
             state.get("current_probe_id"),
             student_ans_raw,
             sorted(student_selections),
