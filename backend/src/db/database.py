@@ -178,6 +178,26 @@ def record_message(thread_id: str, sequence_no: int, role: str, content: str, no
     finally:
         release_db_connection(conn)
 
+def get_chat_history(user_id: str, limit: int = 20):
+    """Return recent saved messages across a user's sessions, oldest first."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT m.thread_id::text AS thread_id, m.sequence_no,
+                          m.role, m.content, m.node_name
+                FROM chat_messages m
+                JOIN chat_sessions s ON s.thread_id = m.thread_id
+                WHERE s.user_id = %s AND m.role IN ('human', 'ai')
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT %s""",
+                (user_id, max(1, min(limit, 50))),
+            )
+            return [dict(row) for row in reversed(cursor.fetchall())]
+    finally:
+        release_db_connection(conn)
+
+
 def record_probe(thread_id: str, question: str, options: list[dict], message_id: int | None = None):
     conn = get_db_connection()
     try:
@@ -269,6 +289,9 @@ async def a_ensure_chat_session(thread_id: str, user_id: str, topic: str | None 
 async def a_record_message(thread_id: str, sequence_no: int, role: str, content: str,
                            node_name: str | None = None):
     return await asyncio.to_thread(record_message, thread_id, sequence_no, role, content, node_name)
+
+async def a_get_chat_history(user_id: str, limit: int = 20):
+    return await asyncio.to_thread(get_chat_history, user_id, limit)
 
 async def a_record_llm_event(thread_id: str, node_name: str, event_name: str, **kwargs):
     return await asyncio.to_thread(record_llm_event, thread_id, node_name, event_name, **kwargs)

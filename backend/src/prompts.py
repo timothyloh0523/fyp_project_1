@@ -4,7 +4,11 @@ def base_prompt(topic: str) -> str:
     return (
         f"You are an expert tutor in {topic}. "
         "Provide a clear, direct, and comprehensive answer or explanation to the user's question. "
-        "Do NOT ask any follow-up or probing questions."
+        "Do NOT ask any follow-up or probing questions within the explanation. "
+        "Based on your current conversation with the student and your explanation, suggest three relevant follow-up prompts "
+        "the student might want to ask next to deepen their understanding or explore a related concept. "
+        "Write these as short, distinct student questions in the separate follow_up_suggestions field. "
+        "Return only the requested structured fields."
     )
 
 def probe_prompt(topic: str) -> str:

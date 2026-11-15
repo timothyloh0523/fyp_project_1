@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type OptionItem = { label: string; option: string; is_correct?: boolean; explanation?: string };
 type Stats = { curr_streak: number; best_streak: number; total_score: number; total_attempts: number; weekly_score: number };
@@ -13,6 +13,7 @@ type ChatResponse = {
   probe_question: string | null;
   awaiting_eval: boolean;
   options_list: OptionItem[];
+  follow_up_suggestions: string[];
   user_stats: Stats;
   score?: number;
   weekly_score?: number;
@@ -41,6 +42,9 @@ export default function Home() {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [question, setQuestion] = useState("");
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<string[]>([]);
+  const questionInputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const [options, setOptions] = useState<OptionItem[]>([]);
   const [probeQuestion, setProbeQuestion] = useState<string | null>(null);
   const [probeFeedback, setProbeFeedback] = useState<string | null>(null);
@@ -69,6 +73,11 @@ export default function Home() {
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [messages, loading, followUpSuggestions]);
+
   const canSubmit = useMemo(() => selected.length > 0 && !loading, [selected, loading]);
 
   async function send(prompt: string, displayText: string) {
@@ -79,6 +88,7 @@ export default function Home() {
       setThreadId(result.thread_id);
       setOptions(result.options_list ?? []);
       setProbeQuestion(result.probe_question);
+      setFollowUpSuggestions(result.follow_up_suggestions ?? []);
       setProbeFeedback(null);
       setSelected([]);
       setStats(result.user_stats);
@@ -112,6 +122,7 @@ export default function Home() {
       setOptions([]);
       setSelected([]);
       setProbeFeedback(result.response);
+      setFollowUpSuggestions(result.follow_up_suggestions ?? []);
       setStats(result.user_stats);
       setWeeklyCorrect(result.weekly_score ?? result.user_stats.weekly_score ?? 0);
     } catch (err) {
@@ -153,15 +164,11 @@ export default function Home() {
         </div>
         <section className="user-stats-card header-user-stats" aria-label="User stats">
           <div className="user-stats-heading">
-            <div>
-              <p className="eyebrow">YOUR PROGRESS</p>
-              <h2>User stats</h2>
+            <p className="eyebrow">YOUR PROGRESS</p>
+            <div className="header-metrics">
+              <span>Lifetime score <strong>{stats?.total_score ?? 0}</strong></span>
+              <span>Streak <strong>{stats?.curr_streak ?? 0}</strong></span>
             </div>
-            <span className="stats-badge">✦</span>
-          </div>
-          <div className="lifetime-stats">
-            <div><span>Lifetime score</span><strong>{stats?.total_score ?? 0}</strong></div>
-            <div><span>Streak</span><strong>{stats?.curr_streak ?? 0}</strong></div>
           </div>
           <div className="weekly-goal">
             <div className="goal-title">
@@ -180,21 +187,12 @@ export default function Home() {
               <p className="eyebrow">
                 CONVERSATION
               </p>
-              <h2>
-                Ask anything
-              </h2>
             </div>
-            <span className="status-dot">
-              ● online
-            </span>
           </div>
-          <div className="messages">
+          <div className="messages" ref={messagesRef}>
             {
               messages.length === 0 &&
               <div className="empty-state">
-                <span>
-                  ✦
-                </span>
                 <h3>
                   What would you like to understand?
                 </h3>
@@ -230,6 +228,7 @@ export default function Home() {
             onSubmit={submitQuestion}
           >
             <input
+              ref={questionInputRef}
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               placeholder="Ask a question…"
@@ -243,43 +242,36 @@ export default function Home() {
               Send ↗
             </button>
           </form>
+          {followUpSuggestions.length > 0 && (
+            <div className="follow-up-suggestions" aria-label="Suggested follow-up questions">
+              <span>Explore next</span>
+              <div className="suggestion-list">
+                {followUpSuggestions.map((suggestion) => (
+                  <button
+                    className="suggestion"
+                    type="button"
+                    key={suggestion}
+                    disabled={loading}
+                    onClick={() => {
+                      setQuestion(suggestion);
+                      questionInputRef.current?.focus({ preventScroll: true });
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
         <div className="right-rail">
-          <section className="user-stats-card" aria-label="User stats">
-            <div className="user-stats-heading">
-              <div>
-                <p className="eyebrow">YOUR PROGRESS</p>
-                <h2>User stats</h2>
-              </div>
-              <span className="stats-badge">✦</span>
-            </div>
-            <div className="lifetime-stats">
-              <div><span>Lifetime score</span><strong>{stats?.total_score ?? 0}</strong></div>
-              <div><span>Streak</span><strong>{stats?.curr_streak ?? 0}</strong></div>
-            </div>
-            <div className="weekly-goal">
-              <div className="goal-title">
-                <span>{GOAL_LABELS[goal.goal_type]}</span>
-                <strong>{weeklyCorrect} / {goal.number}</strong>
-              </div>
-              <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
-              <div className="goal-footer"><span>{progress}% complete</span><button onClick={() => setShowGoalEditor(true)}>Set goal</button></div>
-            </div>
-          </section>
-
           <aside className="probe-panel">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">
-                QUICK CHECK
+                QUICK PROGRESS CHECK
               </p>
-              <h2>
-                Show your thinking
-              </h2>
             </div>
-            <span className="check-icon">
-              ✓
-            </span>
           </div>
           {options.length > 0 ? (
             <>
@@ -322,9 +314,8 @@ export default function Home() {
             </>
           ) : (
             <div className="probe-empty">
-              <span>☷</span>
               <p className={probeFeedback ? "probe-feedback" : undefined}>
-                {probeFeedback ?? "Your next check-in will appear here after you ask a question."}
+                {probeFeedback ?? "Your next follow-up question will appear here after you ask the tutor a question."}
               </p>
             </div>
           )}

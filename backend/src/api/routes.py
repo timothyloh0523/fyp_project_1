@@ -1,6 +1,5 @@
 import uuid
 import re
-import asyncio
 from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -88,20 +87,17 @@ async def chat(request: ChatRequest):
     if not is_answer:
         await a_upsert_user_stats(request.user_id, updated_stats)
     
-    asyncio.create_task(a_record_message(
-        session_id,
-        len(result["messages"]) - 1,
-        "human",
-        request.prompt,
-        "evaluate" if is_answer else "tutor",
-    ))
-    asyncio.create_task(a_record_message(
-        session_id,
-        len(result["messages"]),
-        "ai" if latest_message.type == "ai" else "human",
-        latest_message.content,
-        "evaluate" if is_answer else "prober",
-    ))
+    # Save the tutor explanation as well as the prompt/probe before returning,
+    # so a subsequent run can immediately retrieve the complete exchange.
+    new_messages = result["messages"][-(2 if is_answer else 3):]
+    node_names = ["evaluate", "evaluate"] if is_answer else ["tutor", "tutor", "prober"]
+    for sequence_no, (message, node_name) in enumerate(
+        zip(new_messages, node_names),
+        start=len(result["messages"]) - len(new_messages) + 1,
+    ):
+        await a_record_message(
+            session_id, sequence_no, message.type, message.content, node_name
+        )
 
     return {
         "thread_id": session_id,
@@ -109,6 +105,7 @@ async def chat(request: ChatRequest):
         "response": latest_message.content,
         "tutor_response": tutor_message.content,
         "probe_question": probe_message.content if probe_message else None,
+        "follow_up_suggestions": result.get("follow_up_suggestions", []),
         "awaiting_eval": result.get("awaiting_eval", False),
         "options_list": [
             {"label": item.get("label", item["option"]), "option": item["option"]}

@@ -26,6 +26,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     awaiting_eval: bool
     options_list: Optional[List[OptionItem]]  
+    follow_up_suggestions: List[str]
     user_id: Optional[str]
     user_stats: Optional[UserStats]
     score: Optional[int]
