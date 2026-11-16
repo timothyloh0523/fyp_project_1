@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormattedMessage } from "../src/utils/messageFormatter";
 
 type OptionItem = { label: string; option: string; is_correct?: boolean; explanation?: string };
 type Stats = { curr_streak: number; best_streak: number; total_score: number; total_attempts: number; weekly_score: number };
@@ -207,9 +208,7 @@ export default function Home() {
                   <span className="message-label">
                     {message.role === "user" ? "YOU" : "TUTOR"}
                   </span>
-                  <p>
-                    {message.content}
-                  </p>
+                  <FormattedMessage message={message.content} />
                 </div>
               )}
             {
@@ -275,9 +274,7 @@ export default function Home() {
           </div>
           {options.length > 0 ? (
             <>
-              <p className="probe-copy">
-                {probeQuestion}
-              </p>
+              <FormattedMessage className="probe-copy" message={probeQuestion ?? ""} />
               <p className="hint">Select all that apply
               </p>
               <div className="options">
@@ -295,9 +292,7 @@ export default function Home() {
                     <span className="option-key">
                       {item.label}
                     </span>
-                    <span>
-                      {item.option}
-                    </span>
+                    <FormattedMessage className="option-copy" message={item.option} insideButton />
                     <span className="option-check">
                       {selected.includes(item.label) ? "✓" : ""}
                     </span>
@@ -314,9 +309,11 @@ export default function Home() {
             </>
           ) : (
             <div className="probe-empty">
-              <p className={probeFeedback ? "probe-feedback" : undefined}>
-                {probeFeedback ?? "Your next follow-up question will appear here after you ask the tutor a question."}
-              </p>
+              {probeFeedback ? (
+                <FormattedMessage className="probe-feedback" message={probeFeedback} />
+              ) : (
+                <p>Your next follow-up question will appear here after you ask the tutor a question.</p>
+              )}
             </div>
           )}
           </aside>
